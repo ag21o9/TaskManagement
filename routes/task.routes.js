@@ -364,9 +364,9 @@ adminRouter.delete("/:taskId", async (req, res) => {
 });
 
 // ======================================================
-// PUT /api/tasks/:taskId/assign (ADMIN ONLY)
+// PUT /api/tasks/:taskId/assign (ADMIN + PROJECT MANAGER/OWNER + PARENT TASK ASSIGNEE)
 // ======================================================
-adminRouter.put("/:taskId/assign", async (req, res) => {
+router.put("/:taskId/assign", verifyToken, async (req, res) => {
     try {
         const { taskId } = req.params;
         const { assignedToId } = req.body;
@@ -387,6 +387,32 @@ adminRouter.put("/:taskId/assign", async (req, res) => {
             return res.status(404).json({
                 success: false,
                 message: "Task not found",
+            });
+        }
+
+        const projectManager = await prisma.projectMember.findFirst({
+            where: {
+                projectId: task.projectId,
+                userId: req.user.id,
+                role: { in: ["OWNER", "MANAGER"] },
+            },
+        });
+
+        let parentAssigneeAllowed = false;
+        if (task.parentTaskId) {
+            const parentTask = await prisma.task.findUnique({
+                where: { id: task.parentTaskId },
+                select: { assignedToId: true },
+            });
+            parentAssigneeAllowed = parentTask?.assignedToId === req.user.id;
+        }
+
+        const canAssign = req.user.role === "ADMIN" || Boolean(projectManager) || parentAssigneeAllowed;
+
+        if (!canAssign) {
+            return res.status(403).json({
+                success: false,
+                message: "Only admin, project manager/owner, or the parent task assignee can assign this task",
             });
         }
 
