@@ -604,6 +604,60 @@ router.get("/:projectId", verifyToken, async (req, res) => {
     }
 });
 
+// ======================================================
+// GET /api/projects/:projectId/analytics (COMMON)
+// Accessible to admins or project members
+// ======================================================
+router.get("/:projectId/analytics", verifyToken, async (req, res) => {
+    try {
+        const { projectId } = req.params;
+
+        const allowed = await canAccessProject(projectId, req.user.id, req.user.role);
+        if (!allowed) {
+            return res.status(403).json({ success: false, message: "Access denied. Must be project member or admin" });
+        }
+
+        const project = await prisma.project.findUnique({ where: { id: projectId } });
+        if (!project) {
+            return res.status(404).json({ success: false, message: "Project not found" });
+        }
+
+        const totalTasks = await prisma.task.count({ where: { projectId } });
+        const completedTasks = await prisma.task.count({ where: { projectId, status: "COMPLETED" } });
+        const inProgressTasks = await prisma.task.count({ where: { projectId, status: "IN_PROGRESS" } });
+        const todoTasks = await prisma.task.count({ where: { projectId, status: "TODO" } });
+        const overdueTasks = await prisma.task.count({ where: { projectId, status: { not: "COMPLETED" }, dueDate: { lt: new Date() }, isArchived: false } });
+
+        const teamMembers = await prisma.projectMember.count({ where: { projectId } });
+
+        const completionPercentage = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+        const projectStartDate = project.startDate;
+        const projectEndDate = project.endDate;
+        const today = new Date();
+
+        let timelinePercentage = 0;
+        if (projectStartDate && projectEndDate) {
+            const totalDays = (projectEndDate - projectStartDate) / (1000 * 60 * 60 * 24);
+            const elapsedDays = (today - projectStartDate) / (1000 * 60 * 60 * 24);
+            timelinePercentage = Math.min(100, Math.round((elapsedDays / totalDays) * 100));
+        }
+
+        res.status(200).json({
+            success: true,
+            analytics: {
+                project: { id: project.id, title: project.title, description: project.description },
+                tasks: { total: totalTasks, completed: completedTasks, inProgress: inProgressTasks, todo: todoTasks, overdue: overdueTasks, completionPercentage },
+                team: { members: teamMembers },
+                timeline: { startDate: projectStartDate, endDate: projectEndDate, timelinePercentage },
+            },
+        });
+    } catch (error) {
+        console.error("Get project analytics error:", error);
+        res.status(500).json({ success: false, message: "Internal server error" });
+    }
+});
+
 // Mount admin routes
 router.use(adminRouter);
 

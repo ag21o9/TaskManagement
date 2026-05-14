@@ -1,5 +1,6 @@
 import express from "express";
 import { prisma } from "../lib/prisma.js";
+import { recordTaskActivity } from "../lib/taskActivity.js";
 import { verifyToken } from "../middlewares/auth.middleware.js";
 
 const router = express.Router();
@@ -54,6 +55,14 @@ router.post("/:taskId/attachments", async (req, res) => {
                     },
                 },
             },
+        });
+
+        await recordTaskActivity({
+            taskId,
+            userId: req.user.id,
+            activityType: "ATTACHMENT_ADDED",
+            message: `Attachment added: ${fileName}`,
+            newValue: attachment.id,
         });
 
         res.status(201).json({

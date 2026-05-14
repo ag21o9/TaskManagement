@@ -1,5 +1,6 @@
 import express from "express";
 import { prisma } from "../lib/prisma.js";
+import { recordTaskActivity } from "../lib/taskActivity.js";
 import { verifyToken } from "../middlewares/auth.middleware.js";
 
 const router = express.Router();
@@ -51,6 +52,14 @@ router.post("/:taskId/comments", async (req, res) => {
                     },
                 },
             },
+        });
+
+        await recordTaskActivity({
+            taskId,
+            userId: req.user.id,
+            activityType: "COMMENT_ADDED",
+            message: `Comment added: ${message}`,
+            newValue: comment.id,
         });
 
         res.status(201).json({

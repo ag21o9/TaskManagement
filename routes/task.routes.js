@@ -1,5 +1,6 @@
 import express from "express";
 import { prisma } from "../lib/prisma.js";
+import { recordTaskActivity } from "../lib/taskActivity.js";
 import { verifyToken, isAdmin } from "../middlewares/auth.middleware.js";
 
 const router = express.Router();
@@ -153,6 +154,14 @@ router.post("/", verifyToken, async (req, res) => {
             await ensureProjectMember(projectId, assignedToId);
         }
 
+        await recordTaskActivity({
+            taskId: task.id,
+            userId: req.user.id,
+            activityType: "CREATED",
+            message: `Task \"${title}\" created`,
+            newValue: task.taskCode,
+        });
+
         res.status(201).json({
             success: true,
             message: "Task created successfully",
@@ -221,6 +230,14 @@ adminRouter.put("/:taskId", async (req, res) => {
                     },
                 },
             },
+        });
+
+        await recordTaskActivity({
+            taskId,
+            userId: req.user.id,
+            activityType: "UPDATED",
+            message: "Task updated",
+            newValue: JSON.stringify(updateData),
         });
 
         res.status(200).json({
@@ -318,6 +335,22 @@ router.post("/:taskId/subtasks", verifyToken, async (req, res) => {
         if (assignedToId) {
             await ensureProjectMember(parentTask.projectId, assignedToId);
         }
+
+        await recordTaskActivity({
+            taskId: subtask.id,
+            userId: req.user.id,
+            activityType: "CREATED",
+            message: `Subtask \"${title}\" created`,
+            newValue: subtask.taskCode,
+        });
+
+        await recordTaskActivity({
+            taskId: parentTask.id,
+            userId: req.user.id,
+            activityType: "SUBTASK_CREATED",
+            message: `Subtask \"${title}\" created under parent task`,
+            newValue: subtask.id,
+        });
 
         res.status(201).json({ success: true, message: "Subtask created successfully", task: subtask });
     } catch (error) {
@@ -452,6 +485,15 @@ router.put("/:taskId/assign", verifyToken, async (req, res) => {
 
         await ensureProjectMember(task.projectId, assignedToId);
 
+        await recordTaskActivity({
+            taskId,
+            userId: req.user.id,
+            activityType: "ASSIGNED",
+            message: `Task assigned to ${user.name}`,
+            oldValue: task.assignedToId || null,
+            newValue: assignedToId,
+        });
+
         res.status(200).json({
             success: true,
             message: "Task assigned successfully",
@@ -490,6 +532,14 @@ adminRouter.put("/:taskId/archive", async (req, res) => {
         const updatedTask = await prisma.task.update({
             where: { id: taskId },
             data: { isArchived: isArchived || false },
+        });
+
+        await recordTaskActivity({
+            taskId,
+            userId: req.user.id,
+            activityType: "UPDATED",
+            message: isArchived ? "Task archived" : "Task unarchived",
+            newValue: String(Boolean(isArchived)),
         });
 
         res.status(200).json({
@@ -637,6 +687,82 @@ router.get("/:taskId/subtasks", verifyToken, async (req, res) => {
     }
 });
 
+// ======================================================
+// GET /api/tasks/:taskId/activities (COMMON)
+// ======================================================
+router.get("/:taskId/activities", verifyToken, async (req, res) => {
+    try {
+        const { taskId } = req.params;
+        const { page = 1, limit = 20 } = req.query;
+
+        const task = await prisma.task.findUnique({
+            where: { id: taskId },
+            select: { id: true, projectId: true },
+        });
+
+        if (!task) {
+            return res.status(404).json({
+                success: false,
+                message: "Task not found",
+            });
+        }
+
+        if (req.user.role !== "ADMIN") {
+            const projectMember = await prisma.projectMember.findFirst({
+                where: {
+                    projectId: task.projectId,
+                    userId: req.user.id,
+                },
+            });
+
+            if (!projectMember) {
+                return res.status(403).json({
+                    success: false,
+                    message: "You do not have access to this task activities",
+                });
+            }
+        }
+
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+
+        const total = await prisma.taskActivity.count({ where: { taskId } });
+
+        const activities = await prisma.taskActivity.findMany({
+            where: { taskId },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        name: true,
+                        email: true,
+                        avatar: true,
+                    },
+                },
+            },
+            orderBy: { createdAt: "desc" },
+            skip,
+            take: parseInt(limit),
+        });
+
+        res.status(200).json({
+            success: true,
+            data: activities,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total,
+                pages: Math.ceil(total / parseInt(limit)),
+            },
+        });
+    } catch (error) {
+        console.error("Get task activities error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Internal server error",
+        });
+    }
+});
+
 router.get("/:taskId", verifyToken, async (req, res) => {
     try {
         const { taskId } = req.params;
@@ -773,6 +899,22 @@ router.put("/:taskId/status", verifyToken, async (req, res) => {
             },
         });
 
+        const activityType =
+            status === "COMPLETED"
+                ? "COMPLETED"
+                : task.status === "COMPLETED"
+                    ? "REOPENED"
+                    : "STATUS_CHANGED";
+
+        await recordTaskActivity({
+            taskId,
+            userId: req.user.id,
+            activityType,
+            message: `Task status changed from ${task.status} to ${status}`,
+            oldValue: task.status,
+            newValue: status,
+        });
+
         res.status(200).json({
             success: true,
             message: "Task status updated successfully",
@@ -818,6 +960,14 @@ router.put("/:taskId/progress", verifyToken, async (req, res) => {
         const updatedTask = await prisma.task.update({
             where: { id: taskId },
             data: { progress },
+        });
+
+        await recordTaskActivity({
+            taskId,
+            userId: req.user.id,
+            activityType: "UPDATED",
+            message: `Task progress updated to ${progress}%`,
+            newValue: String(progress),
         });
 
         res.status(200).json({

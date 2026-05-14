@@ -5,7 +5,152 @@ import { verifyToken, isAdmin } from "../middlewares/auth.middleware.js";
 
 const router = express.Router();
 
-// Apply auth and admin middleware to all routes
+// ======================================================
+// GET /api/users (AUTHENTICATED USERS: admin and others)
+// ======================================================
+router.get("/", verifyToken, async (req, res) => {
+    try {
+        const { page = 1, limit = 10, role, isActive } = req.query;
+
+        // Build where clause for filtering
+        const where = {};
+        if (role) where.role = role;
+        if (isActive !== undefined) where.isActive = isActive === "true";
+
+        // Calculate pagination
+        const skip = (page - 1) * limit;
+
+        // Get total count
+        const total = await prisma.user.count({ where });
+
+        // Get users
+        const users = await prisma.user.findMany({
+            where,
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                phone: true,
+                avatar: true,
+                role: true,
+                isActive: true,
+                createdAt: true,
+                updatedAt: true,
+            },
+            skip,
+            take: parseInt(limit),
+            orderBy: { createdAt: "desc" },
+        });
+
+        res.status(200).json({
+            success: true,
+            data: users,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total,
+                pages: Math.ceil(total / limit),
+            },
+        });
+    } catch (error) {
+        console.error("Get users error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Internal server error",
+        });
+    }
+});
+
+// ======================================================
+// GET /api/users/projects (AUTHENTICATED USERS)
+// Returns projects the current user is a member of or has assigned tasks in
+// Includes recent project tasks and tasks assigned to the user within each project
+// ======================================================
+router.get("/projects", verifyToken, async (req, res) => {
+    try {
+        const userId = req.user?.id;
+
+        // Projects where user is a member
+        const memberProjects = await prisma.project.findMany({
+            where: { members: { some: { userId } } },
+            select: {
+                id: true,
+                title: true,
+                description: true,
+                color: true,
+                progress: true,
+                startDate: true,
+                endDate: true,
+                isArchived: true,
+                _count: { select: { members: true, tasks: true } },
+            },
+        });
+
+        // Projects derived from tasks assigned to the user
+        const assignedProjectIdsRaw = await prisma.task.findMany({
+            where: { assignedToId: userId },
+            select: { projectId: true },
+        });
+        const assignedProjectIds = [...new Set(assignedProjectIdsRaw.map((p) => p.projectId))].filter(Boolean);
+
+        let assignedProjects = [];
+        if (assignedProjectIds.length > 0) {
+            assignedProjects = await prisma.project.findMany({
+                where: { id: { in: assignedProjectIds } },
+                select: {
+                    id: true,
+                    title: true,
+                    description: true,
+                    color: true,
+                    progress: true,
+                    startDate: true,
+                    endDate: true,
+                    isArchived: true,
+                    _count: { select: { members: true, tasks: true } },
+                },
+            });
+        }
+
+        // Merge projects (unique by id)
+        const projectsMap = new Map();
+        [...memberProjects, ...assignedProjects].forEach((p) => projectsMap.set(p.id, p));
+        const projects = Array.from(projectsMap.values());
+
+        // For each project, fetch recent tasks and tasks assigned to the user within that project
+        const projectsWithTasks = await Promise.all(
+            projects.map(async (proj) => {
+                const recentTasks = await prisma.task.findMany({
+                    where: { projectId: proj.id },
+                    orderBy: { createdAt: "desc" },
+                    take: 5,
+                    select: { id: true, taskCode: true, title: true, status: true, priority: true, assignedToId: true, dueDate: true, createdAt: true },
+                });
+
+                const myTasks = await prisma.task.findMany({
+                    where: { projectId: proj.id, assignedToId: userId },
+                    orderBy: { createdAt: "desc" },
+                    take: 10,
+                    select: { id: true, taskCode: true, title: true, status: true, priority: true, dueDate: true, createdAt: true },
+                });
+
+                return {
+                    ...proj,
+                    recentTasks,
+                    myTasks,
+                    membersCount: proj._count?.members ?? 0,
+                    taskCount: proj._count?.tasks ?? 0,
+                };
+            })
+        );
+
+        res.status(200).json({ success: true, projects: projectsWithTasks });
+    } catch (error) {
+        console.error("Get user projects error:", error);
+        res.status(500).json({ success: false, message: "Internal server error" });
+    }
+});
+
+// Apply auth and admin middleware to all remaining routes (ADMIN ONLY)
 router.use(verifyToken, isAdmin);
 
 // ======================================================

@@ -4,82 +4,72 @@ import { verifyToken, isAdmin } from "../middlewares/auth.middleware.js";
 
 const router = express.Router();
 
-// Apply auth and admin middleware to all routes
-router.use(verifyToken, isAdmin);
+// Apply auth middleware to all routes (require authentication)
+router.use(verifyToken);
 
 // ======================================================
-// GET /api/dashboard/stats (ADMIN ONLY)
+// GET /api/dashboard/stats (ADMIN and AUTHENTICATED USERS)
+// - Admins receive global stats
+// - Regular users receive stats scoped to their assigned tasks/projects
 // ======================================================
 router.get("/stats", async (req, res) => {
   try {
-    // Get total users
-    const totalUsers = await prisma.user.count();
+    const userId = req.user?.id;
+    const isUserAdmin = req.user?.role === "ADMIN";
 
-    // Get active users (active projects)
-    const activeUsers = await prisma.user.count({
-      where: { isActive: true },
-    });
-
-    // Get active projects
-    const activeProjects = await prisma.project.count({
-      where: { isArchived: false },
-    });
-
-    // Get total projects
-    const totalProjects = await prisma.project.count();
-
-    // Get completed tasks
-    const completedTasks = await prisma.task.count({
-      where: { status: "COMPLETED" },
-    });
-
-    // Get total tasks
-    const totalTasks = await prisma.task.count();
-
-    // Get overdue tasks
-    const overdueTasks = await prisma.task.count({
-      where: {
-        status: { not: "COMPLETED" },
-        dueDate: {
-          lt: new Date(),
+    if (isUserAdmin) {
+      // Admin: return global stats
+      const totalUsers = await prisma.user.count();
+      const activeUsers = await prisma.user.count({ where: { isActive: true } });
+      const activeProjects = await prisma.project.count({ where: { isArchived: false } });
+      const totalProjects = await prisma.project.count();
+      const completedTasks = await prisma.task.count({ where: { status: "COMPLETED" } });
+      const totalTasks = await prisma.task.count();
+      const overdueTasks = await prisma.task.count({
+        where: {
+          status: { not: "COMPLETED" },
+          dueDate: { lt: new Date() },
+          isArchived: false,
         },
-        isArchived: false,
-      },
+      });
+      const inProgressTasks = await prisma.task.count({ where: { status: "IN_PROGRESS" } });
+
+      return res.status(200).json({
+        success: true,
+        stats: {
+          users: { total: totalUsers, active: activeUsers, inactive: totalUsers - activeUsers },
+          projects: { total: totalProjects, active: activeProjects, archived: totalProjects - activeProjects },
+          tasks: { total: totalTasks, completed: completedTasks, inProgress: inProgressTasks, overdue: overdueTasks, pending: totalTasks - completedTasks - inProgressTasks },
+        },
+      });
+    }
+
+    // Regular user: stats scoped to their assignments
+    // Projects the user is a member of (active)
+    const userActiveProjects = await prisma.projectMember.count({
+      where: { userId, project: { isArchived: false } },
     });
 
-    // Get tasks in progress
-    const inProgressTasks = await prisma.task.count({
-      where: { status: "IN_PROGRESS" },
-    });
+    // Tasks assigned to the user
+    const totalAssigned = await prisma.task.count({ where: { assignedToId: userId, isArchived: false } });
+    const completedAssigned = await prisma.task.count({ where: { assignedToId: userId, status: "COMPLETED", isArchived: false } });
+    const inProgressAssigned = await prisma.task.count({ where: { assignedToId: userId, status: "IN_PROGRESS", isArchived: false } });
+    const pendingAssigned = await prisma.task.count({ where: { assignedToId: userId, status: "TODO", isArchived: false } });
+    const overdueAssigned = await prisma.task.count({ where: { assignedToId: userId, status: { not: "COMPLETED" }, dueDate: { lt: new Date() }, isArchived: false } });
 
-    res.status(200).json({
+    const productivity = totalAssigned > 0 ? Math.round((completedAssigned / totalAssigned) * 100) : 0;
+
+    return res.status(200).json({
       success: true,
       stats: {
-        users: {
-          total: totalUsers,
-          active: activeUsers,
-          inactive: totalUsers - activeUsers,
-        },
-        projects: {
-          total: totalProjects,
-          active: activeProjects,
-          archived: totalProjects - activeProjects,
-        },
-        tasks: {
-          total: totalTasks,
-          completed: completedTasks,
-          inProgress: inProgressTasks,
-          overdue: overdueTasks,
-          pending: totalTasks - completedTasks - inProgressTasks,
-        },
+        projects: { total: userActiveProjects },
+        tasks: { total: totalAssigned, completed: completedAssigned, inProgress: inProgressAssigned, pending: pendingAssigned, overdue: overdueAssigned },
+        teamProductivity: productivity,
       },
     });
   } catch (error) {
     console.error("Get dashboard stats error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
+    res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
 
@@ -89,6 +79,8 @@ router.get("/stats", async (req, res) => {
 router.get("/projects/:projectId/analytics", async (req, res) => {
   try {
     const { projectId } = req.params;
+    const userId = req.user?.id;
+    const isUserAdmin = req.user?.role === "ADMIN";
 
     // Check if project exists
     const project = await prisma.project.findUnique({
@@ -96,46 +88,33 @@ router.get("/projects/:projectId/analytics", async (req, res) => {
     });
 
     if (!project) {
-      return res.status(404).json({
-        success: false,
-        message: "Project not found",
+      return res.status(404).json({ success: false, message: "Project not found" });
+    }
+
+    // If not admin, ensure user is a project member
+    if (!isUserAdmin) {
+      const membership = await prisma.projectMember.findFirst({
+        where: { projectId, userId },
       });
+      if (!membership) {
+        return res.status(403).json({ success: false, message: "Access denied. Must be project member or admin" });
+      }
     }
 
     // Get project tasks
-    const totalTasks = await prisma.task.count({
-      where: { projectId },
-    });
-
-    const completedTasks = await prisma.task.count({
-      where: { projectId, status: "COMPLETED" },
-    });
-
-    const inProgressTasks = await prisma.task.count({
-      where: { projectId, status: "IN_PROGRESS" },
-    });
-
-    const todoTasks = await prisma.task.count({
-      where: { projectId, status: "TODO" },
-    });
-
+    const totalTasks = await prisma.task.count({ where: { projectId } });
+    const completedTasks = await prisma.task.count({ where: { projectId, status: "COMPLETED" } });
+    const inProgressTasks = await prisma.task.count({ where: { projectId, status: "IN_PROGRESS" } });
+    const todoTasks = await prisma.task.count({ where: { projectId, status: "TODO" } });
     const overdueTasks = await prisma.task.count({
-      where: {
-        projectId,
-        status: { not: "COMPLETED" },
-        dueDate: { lt: new Date() },
-        isArchived: false,
-      },
+      where: { projectId, status: { not: "COMPLETED" }, dueDate: { lt: new Date() }, isArchived: false },
     });
 
     // Get team members
-    const teamMembers = await prisma.projectMember.count({
-      where: { projectId },
-    });
+    const teamMembers = await prisma.projectMember.count({ where: { projectId } });
 
     // Calculate completion percentage
-    const completionPercentage =
-      totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+    const completionPercentage = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 
     // Get project timeline
     const projectStartDate = project.startDate;
@@ -144,54 +123,30 @@ router.get("/projects/:projectId/analytics", async (req, res) => {
 
     let timelinePercentage = 0;
     if (projectStartDate && projectEndDate) {
-      const totalDays =
-        (projectEndDate - projectStartDate) / (1000 * 60 * 60 * 24);
+      const totalDays = (projectEndDate - projectStartDate) / (1000 * 60 * 60 * 24);
       const elapsedDays = (today - projectStartDate) / (1000 * 60 * 60 * 24);
-      timelinePercentage = Math.min(
-        100,
-        Math.round((elapsedDays / totalDays) * 100)
-      );
+      timelinePercentage = Math.min(100, Math.round((elapsedDays / totalDays) * 100));
     }
 
     res.status(200).json({
       success: true,
       analytics: {
-        project: {
-          id: project.id,
-          title: project.title,
-          description: project.description,
-        },
-        tasks: {
-          total: totalTasks,
-          completed: completedTasks,
-          inProgress: inProgressTasks,
-          todo: todoTasks,
-          overdue: overdueTasks,
-          completionPercentage,
-        },
-        team: {
-          members: teamMembers,
-        },
-        timeline: {
-          startDate: projectStartDate,
-          endDate: projectEndDate,
-          timelinePercentage,
-        },
+        project: { id: project.id, title: project.title, description: project.description },
+        tasks: { total: totalTasks, completed: completedTasks, inProgress: inProgressTasks, todo: todoTasks, overdue: overdueTasks, completionPercentage },
+        team: { members: teamMembers },
+        timeline: { startDate: projectStartDate, endDate: projectEndDate, timelinePercentage },
       },
     });
   } catch (error) {
     console.error("Get project analytics error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
+    res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
 
 // ======================================================
 // GET /api/users/:id/productivity (ADMIN ONLY)
 // ======================================================
-router.get("/users/:userId/productivity", async (req, res) => {
+router.get("/users/:userId/productivity", isAdmin, async (req, res) => {
   try {
     const { userId } = req.params;
 
