@@ -28,10 +28,6 @@ app.get("/", (req, res) => {
     })
 })
 
-// ======================================================
-// API ROUTES
-// ======================================================
-
 import authRoutes from "./routes/auth.routes.js"
 import userRoutes from "./routes/user.routes.js"
 import projectRoutes from "./routes/project.routes.js"
