@@ -219,8 +219,246 @@ adminRouter.delete("/:projectId", async (req, res) => {
 });
 
 // ======================================================
+// POST /api/projects/:projectId/members (ADMIN ONLY)
+// ======================================================
+adminRouter.post("/:projectId/members", async (req, res) => {
+    try {
+        const { projectId } = req.params;
+        const { userId, role = "MEMBER" } = req.body;
+
+        if (!userId) {
+            return res.status(400).json({
+                success: false,
+                message: "User ID is required",
+            });
+        }
+
+        const validRoles = ["OWNER", "MANAGER", "MEMBER", "VIEWER"];
+        if (!validRoles.includes(role)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid role. Allowed roles: OWNER, MANAGER, MEMBER, VIEWER",
+            });
+        }
+
+        const [project, user] = await Promise.all([
+            prisma.project.findUnique({ where: { id: projectId } }),
+            prisma.user.findUnique({ where: { id: userId } }),
+        ]);
+
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                message: "Project not found",
+            });
+        }
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found",
+            });
+        }
+
+        const existingMember = await prisma.projectMember.findFirst({
+            where: {
+                projectId,
+                userId,
+            },
+        });
+
+        if (existingMember) {
+            return res.status(409).json({
+                success: false,
+                message: "User is already a member of this project",
+            });
+        }
+
+        const member = await prisma.projectMember.create({
+            data: {
+                projectId,
+                userId,
+                role,
+            },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        name: true,
+                        email: true,
+                    },
+                },
+            },
+        });
+
+        res.status(201).json({
+            success: true,
+            message: "Project member added successfully",
+            member,
+        });
+    } catch (error) {
+        console.error("Add project member error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Internal server error",
+        });
+    }
+});
+
+// ======================================================
+// PUT /api/projects/:projectId/members/:memberId (ADMIN ONLY)
+// ======================================================
+adminRouter.put("/:projectId/members/:memberId", async (req, res) => {
+    try {
+        const { projectId, memberId } = req.params;
+        const { role } = req.body;
+
+        if (!role) {
+            return res.status(400).json({
+                success: false,
+                message: "Role is required",
+            });
+        }
+
+        const validRoles = ["OWNER", "MANAGER", "MEMBER", "VIEWER"];
+        if (!validRoles.includes(role)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid role. Allowed roles: OWNER, MANAGER, MEMBER, VIEWER",
+            });
+        }
+
+        const member = await prisma.projectMember.findFirst({
+            where: {
+                id: memberId,
+                projectId,
+            },
+        });
+
+        if (!member) {
+            return res.status(404).json({
+                success: false,
+                message: "Project member not found",
+            });
+        }
+
+        const updatedMember = await prisma.projectMember.update({
+            where: { id: memberId },
+            data: { role },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        name: true,
+                        email: true,
+                    },
+                },
+            },
+        });
+
+        res.status(200).json({
+            success: true,
+            message: "Project member role updated successfully",
+            member: updatedMember,
+        });
+    } catch (error) {
+        console.error("Update project member role error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Internal server error",
+        });
+    }
+});
+
+// ======================================================
+// DELETE /api/projects/:projectId/members/:memberId (ADMIN ONLY)
+// ======================================================
+adminRouter.delete("/:projectId/members/:memberId", async (req, res) => {
+    try {
+        const { projectId, memberId } = req.params;
+
+        const member = await prisma.projectMember.findFirst({
+            where: {
+                id: memberId,
+                projectId,
+            },
+        });
+
+        if (!member) {
+            return res.status(404).json({
+                success: false,
+                message: "Project member not found",
+            });
+        }
+
+        await prisma.projectMember.delete({
+            where: { id: memberId },
+        });
+
+        res.status(200).json({
+            success: true,
+            message: "Project member removed successfully",
+        });
+    } catch (error) {
+        console.error("Remove project member error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Internal server error",
+        });
+    }
+});
+
+// ======================================================
 // COMMON ENDPOINTS (ADMIN + USER)
 // ======================================================
+
+// ======================================================
+// GET /api/projects/:projectId/members (COMMON)
+// ======================================================
+router.get("/:projectId/members", verifyToken, async (req, res) => {
+    try {
+        const { projectId } = req.params;
+
+        const project = await prisma.project.findUnique({
+            where: { id: projectId },
+        });
+
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                message: "Project not found",
+            });
+        }
+
+        const members = await prisma.projectMember.findMany({
+            where: { projectId },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        name: true,
+                        email: true,
+                        avatar: true,
+                    },
+                },
+            },
+            orderBy: {
+                createdAt: "desc",
+            },
+        });
+
+        res.status(200).json({
+            success: true,
+            data: members,
+        });
+    } catch (error) {
+        console.error("Get project members error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Internal server error",
+        });
+    }
+});
 
 // ======================================================
 // GET /api/projects (COMMON)
