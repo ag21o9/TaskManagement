@@ -12,9 +12,22 @@ const router = express.Router();
 const adminRouter = express.Router();
 adminRouter.use(verifyToken, isAdmin);
 
-// ======================================================
-// POST /api/projects (ADMIN ONLY)
-// ======================================================
+const canAccessProject = async (projectId, userId, role) => {
+    if (role === "ADMIN") {
+        return true;
+    }
+
+    const member = await prisma.projectMember.findFirst({
+        where: {
+            projectId,
+            userId,
+        },
+    });
+
+    return Boolean(member);
+};
+
+
 adminRouter.post("/", async (req, res) => {
     try {
         const { name, description, color, startDate, endDate } = req.body;
@@ -419,6 +432,14 @@ router.get("/:projectId/members", verifyToken, async (req, res) => {
     try {
         const { projectId } = req.params;
 
+        const allowed = await canAccessProject(projectId, req.user.id, req.user.role);
+        if (!allowed) {
+            return res.status(403).json({
+                success: false,
+                message: "You do not have access to this project",
+            });
+        }
+
         const project = await prisma.project.findUnique({
             where: { id: projectId },
         });
@@ -467,17 +488,27 @@ router.get("/", verifyToken, async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
 
+        const where =
+            req.user.role === "ADMIN"
+                ? { isArchived: false }
+                : {
+                    isArchived: false,
+                    members: {
+                        some: {
+                            userId: req.user.id,
+                        },
+                    },
+                };
+
         // Calculate pagination
         const skip = (page - 1) * limit;
 
         // Get total count
-        const total = await prisma.project.count({
-            where: { isArchived: false },
-        });
+        const total = await prisma.project.count({ where });
 
         // Get projects
         const projects = await prisma.project.findMany({
-            where: { isArchived: false },
+            where,
             include: {
                 createdBy: {
                     select: {
@@ -517,6 +548,14 @@ router.get("/", verifyToken, async (req, res) => {
 router.get("/:projectId", verifyToken, async (req, res) => {
     try {
         const { projectId } = req.params;
+
+        const allowed = await canAccessProject(projectId, req.user.id, req.user.role);
+        if (!allowed) {
+            return res.status(403).json({
+                success: false,
+                message: "You do not have access to this project",
+            });
+        }
 
         const project = await prisma.project.findUnique({
             where: { id: projectId },
