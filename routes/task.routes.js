@@ -10,17 +10,18 @@ adminRouter.use(verifyToken, isAdmin);
 
 const ensureProjectMember = async (projectId, userId) => {
     const existingMember = await prisma.projectMember.findFirst({
-        where: {
-            projectId,
-            userId,
-        },
+        where: { projectId, userId },
     });
 
+    if (!existingMember) {
+        await prisma.projectMember.create({
+            data: { projectId, userId, role: "MEMBER" },
+        });
+    }
+};
 
 const getAccessibleTaskWhere = async (userId, role) => {
-    if (role === "ADMIN") {
-        return { isArchived: false };
-    }
+    if (role === "ADMIN") return { isArchived: false };
 
     const projectIds = await prisma.projectMember.findMany({
         where: { userId },
@@ -29,20 +30,8 @@ const getAccessibleTaskWhere = async (userId, role) => {
 
     return {
         isArchived: false,
-        projectId: {
-            in: projectIds.map((project) => project.projectId),
-        },
+        projectId: { in: projectIds.map((p) => p.projectId) },
     };
-};
-    if (!existingMember) {
-        await prisma.projectMember.create({
-            data: {
-                projectId,
-                userId,
-                role: "MEMBER",
-            },
-        });
-    }
 };
 
 // ======================================================
@@ -245,6 +234,95 @@ adminRouter.put("/:taskId", async (req, res) => {
             success: false,
             message: "Internal server error",
         });
+    }
+});
+
+// ======================================================
+// POST /api/tasks/:taskId/subtasks (COMMON - assignee/project manager/admin)
+// ======================================================
+router.post("/:taskId/subtasks", verifyToken, async (req, res) => {
+    try {
+        const { taskId } = req.params;
+        const { title, description, priority, assignedToId, dueDate, startDate, estimatedHours } = req.body;
+
+        if (!title) {
+            return res.status(400).json({
+                success: false,
+                message: "Subtask title is required",
+            });
+        }
+
+        // Check parent task
+        const parentTask = await prisma.task.findUnique({ where: { id: taskId } });
+        if (!parentTask) {
+            return res.status(404).json({ success: false, message: "Parent task not found" });
+        }
+
+        // Permission: admin OR assigned user of parent OR project manager/owner
+        const allowed =
+            req.user.role === "ADMIN" ||
+            parentTask.assignedToId === req.user.id ||
+            (await prisma.projectMember.findFirst({
+                where: {
+                    projectId: parentTask.projectId,
+                    userId: req.user.id,
+                    role: { in: ["OWNER", "MANAGER"] },
+                },
+            }));
+
+        if (!allowed) {
+            return res.status(403).json({
+                success: false,
+                message: "Only the parent task assignee, project manager/owner, or admin can create subtasks",
+            });
+        }
+
+        // If assigned user is provided, verify they exist
+        if (assignedToId) {
+            const assignedUser = await prisma.user.findUnique({ where: { id: assignedToId } });
+            if (!assignedUser) {
+                return res.status(404).json({ success: false, message: "Assigned user not found" });
+            }
+        }
+
+        // Generate task code based on project
+        const taskCount = await prisma.task.count({ where: { projectId: parentTask.projectId } });
+        const project = await prisma.project.findUnique({ where: { id: parentTask.projectId } });
+        const taskCode = `${project?.title?.substring(0, 3).toUpperCase() || 'SUB'}-${taskCount + 1}`;
+
+        // Create subtask
+        const subtask = await prisma.task.create({
+            data: {
+                taskCode,
+                title,
+                description,
+                projectId: parentTask.projectId,
+                parentTaskId: taskId,
+                createdById: req.user.id,
+                subtaskCreatedById: req.user.id,
+                assignedToId: assignedToId,
+                priority: priority || "MEDIUM",
+                status: "TODO",
+                startDate: startDate ? new Date(startDate) : undefined,
+                dueDate: dueDate ? new Date(dueDate) : undefined,
+                estimatedHours: estimatedHours || undefined,
+            },
+            include: {
+                createdBy: { select: { id: true, name: true, email: true } },
+                assignedTo: { select: { id: true, name: true, email: true } },
+                project: { select: { id: true, title: true } },
+            },
+        });
+
+        // Ensure assigned user is project member
+        if (assignedToId) {
+            await ensureProjectMember(parentTask.projectId, assignedToId);
+        }
+
+        res.status(201).json({ success: true, message: "Subtask created successfully", task: subtask });
+    } catch (error) {
+        console.error("Create subtask error:", error);
+        res.status(500).json({ success: false, message: "Internal server error" });
     }
 });
 
@@ -478,6 +556,61 @@ router.get("/", verifyToken, async (req, res) => {
 // ======================================================
 // GET /api/tasks/:taskId (COMMON)
 // ======================================================
+// ======================================================
+// GET /api/tasks/:taskId/subtasks (COMMON)
+// ======================================================
+router.get("/:taskId/subtasks", verifyToken, async (req, res) => {
+    try {
+        const { taskId } = req.params;
+        const { page = 1, limit = 20 } = req.query;
+
+        // Check parent task exists
+        const parentTask = await prisma.task.findUnique({ where: { id: taskId } });
+        if (!parentTask) {
+            return res.status(404).json({ success: false, message: "Parent task not found" });
+        }
+
+        // Permission: admin or project member
+        if (req.user.role !== "ADMIN") {
+            const member = await prisma.projectMember.findFirst({
+                where: { projectId: parentTask.projectId, userId: req.user.id },
+            });
+            if (!member) {
+                return res.status(403).json({ success: false, message: "You do not have access to these subtasks" });
+            }
+        }
+
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+
+        const total = await prisma.task.count({ where: { parentTaskId: taskId, isArchived: false } });
+
+        const subtasks = await prisma.task.findMany({
+            where: { parentTaskId: taskId, isArchived: false },
+            include: {
+                createdBy: { select: { id: true, name: true, email: true } },
+                assignedTo: { select: { id: true, name: true, email: true } },
+            },
+            skip,
+            take: parseInt(limit),
+            orderBy: { createdAt: "desc" },
+        });
+
+        res.status(200).json({
+            success: true,
+            data: subtasks,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total,
+                pages: Math.ceil(total / parseInt(limit)),
+            },
+        });
+    } catch (error) {
+        console.error("Get subtasks error:", error);
+        res.status(500).json({ success: false, message: "Internal server error" });
+    }
+});
+
 router.get("/:taskId", verifyToken, async (req, res) => {
     try {
         const { taskId } = req.params;
