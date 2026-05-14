@@ -1,0 +1,532 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+enum ProjectRole {
+  OWNER
+  MANAGER
+  MEMBER
+  VIEWER
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  REVIEW
+  COMPLETED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum NotificationType {
+  TASK_ASSIGNED
+  TASK_COMPLETED
+  TASK_COMMENT
+  TASK_STATUS_CHANGED
+  SUBTASK_CREATED
+  TASK_DEPENDENCY_ADDED
+}
+
+enum TaskActivityType {
+  CREATED
+  UPDATED
+  ASSIGNED
+  UNASSIGNED
+  STATUS_CHANGED
+  PRIORITY_CHANGED
+  COMMENT_ADDED
+  ATTACHMENT_ADDED
+  SUBTASK_CREATED
+  COMPLETED
+  REOPENED
+}
+
+// ======================================================
+// USER MODEL
+// ======================================================
+
+model User {
+  id String @id @default(cuid())
+
+  name     String
+  email    String @unique
+  password String
+
+  role Role @default(USER)
+
+  avatar String?
+  phone  String?
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // ==================================================
+  // RELATIONS
+  // ==================================================
+
+  createdProjects Project[] @relation("ProjectCreator")
+
+  assignedTasks Task[] @relation("TaskAssignedTo")
+
+  createdTasks Task[] @relation("TaskCreatedBy")
+
+  createdSubtasks Task[] @relation("SubtaskCreator")
+
+  comments Comment[]
+
+  notifications Notification[]
+
+  taskActivities TaskActivity[]
+
+  projectMembers ProjectMember[]
+
+  taskAssignments TaskAssignmentHistory[] @relation("AssignedTo")
+
+  assignedByLogs TaskAssignmentHistory[] @relation("AssignedBy")
+
+  watchedTasks TaskWatcher[]
+  attachments  Attachment[]
+}
+
+// ======================================================
+// PROJECT MODEL
+// ======================================================
+
+model Project {
+  id String @id @default(cuid())
+
+  title       String
+  description String?
+
+  color String?
+
+  startDate DateTime?
+  endDate   DateTime?
+
+  isArchived Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // ==================================================
+  // RELATIONS
+  // ==================================================
+
+  createdById String
+
+  createdBy User @relation("ProjectCreator", fields: [createdById], references: [id])
+
+  tasks Task[]
+
+  members ProjectMember[]
+
+  labels Label[]
+
+  @@index([createdById])
+}
+
+// ======================================================
+// PROJECT MEMBERS
+// ======================================================
+
+model ProjectMember {
+  id String @id @default(cuid())
+
+  role ProjectRole @default(MEMBER)
+
+  createdAt DateTime @default(now())
+
+  // ==================================================
+  // RELATIONS
+  // ==================================================
+
+  userId String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  projectId String
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, projectId])
+}
+
+// ======================================================
+// TASK MODEL
+// ======================================================
+
+model Task {
+  id String @id @default(cuid())
+
+  taskCode String @unique
+
+  title       String
+  description String?
+
+  status TaskStatus @default(TODO)
+
+  priority Priority @default(MEDIUM)
+
+  progress Int @default(0)
+
+  position Int @default(0)
+
+  startDate   DateTime?
+  dueDate     DateTime?
+  completedAt DateTime?
+
+  estimatedHours Float?
+  actualHours    Float?
+
+  isArchived Boolean @default(false)
+
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // ==================================================
+  // PROJECT RELATION
+  // ==================================================
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // ==================================================
+  // ASSIGNED TO
+  // ==================================================
+
+  assignedToId String?
+  assignedTo   User?   @relation("TaskAssignedTo", fields: [assignedToId], references: [id])
+
+  // ==================================================
+  // CREATED BY
+  // ==================================================
+
+  createdById String
+  createdBy   User   @relation("TaskCreatedBy", fields: [createdById], references: [id])
+
+  // ==================================================
+  // SUBTASK CREATOR
+  // ==================================================
+
+  subtaskCreatedById String?
+  subtaskCreatedBy   User?   @relation("SubtaskCreator", fields: [subtaskCreatedById], references: [id])
+
+  // ==================================================
+  // PARENT TASK RELATION
+  // ==================================================
+
+  parentTaskId String?
+  parentTask   Task?   @relation("TaskHierarchy", fields: [parentTaskId], references: [id], onDelete: Cascade)
+
+  subtasks Task[] @relation("TaskHierarchy")
+
+  // ==================================================
+  // TASK DEPENDENCIES
+  // ==================================================
+
+  dependencies TaskDependency[] @relation("TaskDependencies")
+
+  dependentTasks TaskDependency[] @relation("DependentTasks")
+
+  // ==================================================
+  // COMMENTS
+  // ==================================================
+
+  comments Comment[]
+
+  // ==================================================
+  // ATTACHMENTS
+  // ==================================================
+
+  attachments Attachment[]
+
+  // ==================================================
+  // ACTIVITY LOGS
+  // ==================================================
+
+  activities TaskActivity[]
+
+  // ==================================================
+  // NOTIFICATIONS
+  // ==================================================
+
+  notifications Notification[]
+
+  // ==================================================
+  // LABELS
+  // ==================================================
+
+  labels TaskLabel[]
+
+  // ==================================================
+  // WATCHERS
+  // ==================================================
+
+  watchers TaskWatcher[]
+
+  // ==================================================
+  // ASSIGNMENT HISTORY
+  // ==================================================
+
+  assignmentLogs TaskAssignmentHistory[]
+
+  // ==================================================
+  // INDEXES
+  // ==================================================
+
+  @@index([projectId])
+  @@index([assignedToId])
+  @@index([createdById])
+  @@index([parentTaskId])
+  @@index([status])
+  @@index([priority])
+  @@index([deletedAt])
+}
+
+// ======================================================
+// TASK DEPENDENCIES
+// ======================================================
+
+model TaskDependency {
+  id String @id @default(cuid())
+
+  createdAt DateTime @default(now())
+
+  // ==================================================
+  // TASK
+  // ==================================================
+
+  taskId String
+  task   Task   @relation("TaskDependencies", fields: [taskId], references: [id], onDelete: Cascade)
+
+  // ==================================================
+  // DEPENDS ON TASK
+  // ==================================================
+
+  dependsOnTaskId String
+  dependsOnTask   Task   @relation("DependentTasks", fields: [dependsOnTaskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, dependsOnTaskId])
+}
+
+// ======================================================
+// COMMENTS
+// ======================================================
+
+model Comment {
+  id String @id @default(cuid())
+
+  message String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // ==================================================
+  // RELATIONS
+  // ==================================================
+
+  taskId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([taskId])
+}
+
+// ======================================================
+// ATTACHMENTS
+// ======================================================
+
+model Attachment {
+  id String @id @default(cuid())
+
+  fileName String
+  fileUrl  String
+
+  mimeType String?
+
+  fileSize Int?
+
+  uploadedAt DateTime @default(now())
+
+  // ==================================================
+  // RELATIONS
+  // ==================================================
+
+  taskId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  uploadedById String
+  uploadedBy   User   @relation(fields: [uploadedById], references: [id])
+
+  @@index([taskId])
+}
+
+// ======================================================
+// TASK ACTIVITY LOGS
+// ======================================================
+
+model TaskActivity {
+  id String @id @default(cuid())
+
+  activityType TaskActivityType
+
+  message String?
+
+  oldValue String?
+  newValue String?
+
+  createdAt DateTime @default(now())
+
+  // ==================================================
+  // RELATIONS
+  // ==================================================
+
+  taskId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([taskId])
+  @@index([userId])
+}
+
+// ======================================================
+// TASK ASSIGNMENT HISTORY
+// ======================================================
+
+model TaskAssignmentHistory {
+  id String @id @default(cuid())
+
+  createdAt DateTime @default(now())
+
+  // ==================================================
+  // TASK
+  // ==================================================
+
+  taskId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  // ==================================================
+  // ASSIGNED BY
+  // ==================================================
+
+  assignedById String
+  assignedBy   User   @relation("AssignedBy", fields: [assignedById], references: [id])
+
+  // ==================================================
+  // ASSIGNED TO
+  // ==================================================
+
+  assignedToId String
+  assignedTo   User   @relation("AssignedTo", fields: [assignedToId], references: [id])
+
+  @@index([taskId])
+}
+
+// ======================================================
+// LABELS
+// ======================================================
+
+model Label {
+  id String @id @default(cuid())
+
+  name  String
+  color String?
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  tasks TaskLabel[]
+
+  @@unique([projectId, name])
+}
+
+// ======================================================
+// TASK LABELS
+// ======================================================
+
+model TaskLabel {
+  id String @id @default(cuid())
+
+  taskId  String
+  labelId String
+  task    Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  label   Label  @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, labelId])
+}
+
+// ======================================================
+// TASK WATCHERS
+// ======================================================
+
+model TaskWatcher {
+  id String @id @default(cuid())
+
+  taskId String
+  userId String
+
+  createdAt DateTime @default(now())
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, userId])
+}
+
+// ======================================================
+// NOTIFICATIONS
+// ======================================================
+
+model Notification {
+  id String @id @default(cuid())
+
+  title   String
+  message String
+
+  type NotificationType
+
+  isRead Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  // ==================================================
+  // RELATIONS
+  // ==================================================
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  taskId String?
+  task   Task?   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([taskId])
+}
