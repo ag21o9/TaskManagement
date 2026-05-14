@@ -32,16 +32,38 @@ app.get("/", (req, res) => {
 // API ROUTES
 // ======================================================
 
-import adminAuthRoutes from "./routes/adminauth.route.js"
-import adminUsersRoutes from "./routes/adminusers.route.js"
-import adminProjectsRoutes from "./routes/adminprojects.route.js"
-import adminTasksRoutes from "./routes/admintasks.route.js"
+import authRoutes from "./routes/auth.routes.js"
+import userRoutes from "./routes/user.routes.js"
+import projectRoutes from "./routes/project.routes.js"
+import taskRoutes from "./routes/task.routes.js"
+import commentRoutes from "./routes/comment.routes.js"
+import attachmentRoutes from "./routes/attachment.routes.js"
+import notificationRoutes from "./routes/notification.routes.js"
+import dashboardRoutes from "./routes/dashboard.routes.js"
 
-// Admin Routes
-app.use("/api/auth", adminAuthRoutes)
-app.use("/api/admin/users", adminUsersRoutes)
-app.use("/api/admin/projects", adminProjectsRoutes)
-app.use("/api/admin/tasks", adminTasksRoutes)
+// Auth Routes (Public + Authenticated)
+app.use("/api/auth", authRoutes)
+
+// User Management Routes (Admin only)
+app.use("/api/users", userRoutes)
+
+// Project Routes (Admin + User)
+app.use("/api/projects", projectRoutes)
+
+// Task Routes (Admin + User)
+app.use("/api/tasks", taskRoutes)
+
+// Comment Routes (User + Admin)
+app.use("/api/comments", commentRoutes)
+
+// Attachment Routes (User + Admin)
+app.use("/api/attachments", attachmentRoutes)
+
+// Notification Routes (User + Admin)
+app.use("/api/notifications", notificationRoutes)
+
+// Dashboard Routes (Admin only)
+app.use("/api/dashboard", dashboardRoutes)
 
 
 
