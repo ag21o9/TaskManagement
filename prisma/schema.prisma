@@ -39,6 +39,45 @@ enum Priority {
   URGENT
 }
 
+enum EntityType {
+  PRIVATE
+  GOVERNMENT
+  PSU
+  INDIVIDUAL
+}
+
+model Entity {
+  id String @id @default(cuid())
+
+  name String
+
+  state String
+
+  phoneNumber String
+
+  address String
+
+  workProfile EntityType
+
+  network1 String?
+  network2 String?
+  network3 String?
+
+  gst String?
+  pan String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  projects Project[]
+
+  createdById String
+
+  createdBy User @relation(fields: [createdById], references: [id])
+
+  @@index([name])
+}
+
 enum NotificationType {
   TASK_ASSIGNED
   TASK_COMPLETED
@@ -109,6 +148,8 @@ model User {
 
   watchedTasks TaskWatcher[]
   attachments  Attachment[]
+
+  entities Entity[]
 }
 
 // ======================================================
@@ -139,13 +180,17 @@ model Project {
 
   createdBy User @relation("ProjectCreator", fields: [createdById], references: [id])
 
+  entityId String?
+  entity   Entity? @relation(fields: [entityId], references: [id], onDelete: SetNull)
+
   tasks Task[]
 
   members ProjectMember[]
 
-  labels Label[]
+  labels   Label[]
 
   @@index([createdById])
+  @@index([entityId])
 }
 
 // ======================================================

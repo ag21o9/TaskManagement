@@ -36,6 +36,7 @@ import commentRoutes from "./routes/comment.routes.js"
 import attachmentRoutes from "./routes/attachment.routes.js"
 import notificationRoutes from "./routes/notification.routes.js"
 import dashboardRoutes from "./routes/dashboard.routes.js"
+import entityRoutes from "./routes/entity.routes.js"
 
 // Auth Routes (Public + Authenticated)
 app.use("/api/auth", authRoutes)
@@ -58,6 +59,9 @@ app.use("/api/attachments", attachmentRoutes)
 // Notification Routes (User + Admin)
 app.use("/api/notifications", notificationRoutes)
 
+// Entity Routes (Admin create/list, public get by id)
+app.use("/api/entities", entityRoutes)
+
 // Dashboard Routes (Admin only)
 app.use("/api/dashboard", dashboardRoutes)
 
@@ -69,6 +73,7 @@ app.use((req, res) => {
         message: "Route Not Found",
     })
 })
+
 
 
 app.use((err, req, res, next) => {

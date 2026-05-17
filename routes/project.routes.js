@@ -30,7 +30,7 @@ const canAccessProject = async (projectId, userId, role) => {
 
 adminRouter.post("/", async (req, res) => {
     try {
-        const { name, description, color, startDate, endDate } = req.body;
+        const { name, description, color, startDate, endDate, entityId } = req.body;
 
         // Validation
         if (!name) {
@@ -38,6 +38,17 @@ adminRouter.post("/", async (req, res) => {
                 success: false,
                 message: "Project name is required",
             });
+        }
+
+        let entity = null;
+        if (entityId) {
+            entity = await prisma.entity.findUnique({ where: { id: entityId } });
+            if (!entity) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Entity not found",
+                });
+            }
         }
 
         // Create project
@@ -48,6 +59,7 @@ adminRouter.post("/", async (req, res) => {
                 color,
                 startDate: startDate ? new Date(startDate) : undefined,
                 endDate: endDate ? new Date(endDate) : undefined,
+                entityId: entityId || null,
                 createdById: req.user.id,
                 members: {
                     create: {
@@ -62,6 +74,23 @@ adminRouter.post("/", async (req, res) => {
                         id: true,
                         name: true,
                         email: true,
+                    },
+                },
+                entity: {
+                    select: {
+                        id: true,
+                        name: true,
+                        state: true,
+                        phoneNumber: true,
+                        address: true,
+                        workProfile: true,
+                        network1: true,
+                        network2: true,
+                        network3: true,
+                        gst: true,
+                        pan: true,
+                        createdAt: true,
+                        updatedAt: true,
                     },
                 },
                 members: {
@@ -94,7 +123,7 @@ adminRouter.post("/", async (req, res) => {
 adminRouter.put("/:projectId", async (req, res) => {
     try {
         const { projectId } = req.params;
-        const { name, description, color, startDate, endDate } = req.body;
+        const { name, description, color, startDate, endDate, entityId } = req.body;
 
         // Check if project exists
         const project = await prisma.project.findUnique({
@@ -115,6 +144,17 @@ adminRouter.put("/:projectId", async (req, res) => {
         if (color !== undefined) updateData.color = color;
         if (startDate !== undefined) updateData.startDate = new Date(startDate);
         if (endDate !== undefined) updateData.endDate = new Date(endDate);
+        if (entityId !== undefined) updateData.entityId = entityId || null;
+
+        if (entityId) {
+            const entity = await prisma.entity.findUnique({ where: { id: entityId } });
+            if (!entity) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Entity not found",
+                });
+            }
+        }
 
         // Update project
         const updatedProject = await prisma.project.update({
@@ -126,6 +166,23 @@ adminRouter.put("/:projectId", async (req, res) => {
                         id: true,
                         name: true,
                         email: true,
+                    },
+                },
+                entity: {
+                    select: {
+                        id: true,
+                        name: true,
+                        state: true,
+                        phoneNumber: true,
+                        address: true,
+                        workProfile: true,
+                        network1: true,
+                        network2: true,
+                        network3: true,
+                        gst: true,
+                        pan: true,
+                        createdAt: true,
+                        updatedAt: true,
                     },
                 },
             },
@@ -517,6 +574,23 @@ router.get("/", verifyToken, async (req, res) => {
                         email: true,
                     },
                 },
+                entity: {
+                    select: {
+                        id: true,
+                        name: true,
+                        state: true,
+                        phoneNumber: true,
+                        address: true,
+                        workProfile: true,
+                        network1: true,
+                        network2: true,
+                        network3: true,
+                        gst: true,
+                        pan: true,
+                        createdAt: true,
+                        updatedAt: true,
+                    },
+                },
             },
             skip,
             take: parseInt(limit),
@@ -565,6 +639,23 @@ router.get("/:projectId", verifyToken, async (req, res) => {
                         id: true,
                         name: true,
                         email: true,
+                    },
+                },
+                entity: {
+                    select: {
+                        id: true,
+                        name: true,
+                        state: true,
+                        phoneNumber: true,
+                        address: true,
+                        workProfile: true,
+                        network1: true,
+                        network2: true,
+                        network3: true,
+                        gst: true,
+                        pan: true,
+                        createdAt: true,
+                        updatedAt: true,
                     },
                 },
                 members: {
