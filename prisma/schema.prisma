@@ -53,16 +53,14 @@ model Entity {
 
   state String
 
+  post String?
+
   phoneNumber String
 
   address String
 
   workProfile EntityType
-
-  network1 String?
-  network2 String?
-  network3 String?
-
+  networks String[] @default([])
   gst String?
   pan String?
 
