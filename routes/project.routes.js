@@ -614,11 +614,20 @@ router.get("/", verifyToken, async (req, res) => {
                 ? { isArchived: false }
                 : {
                     isArchived: false,
-                    members: {
-                        some: {
-                            userId: req.user.id,
+                    OR: [
+                        {
+                            members: {
+                                some: {
+                                    userId: req.user.id,
+                                },
+                            },
                         },
-                    },
+                        {
+                            entity: {
+                                createdById: req.user.id,
+                            },
+                        },
+                    ],
                 };
 
         // Calculate pagination
