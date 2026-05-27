@@ -270,7 +270,10 @@ router.post("/:taskId/subtasks", verifyToken, async (req, res) => {
         }
 
         // Check parent task
-        const parentTask = await prisma.task.findUnique({ where: { id: taskId } });
+        const parentTask = await prisma.task.findUnique({
+            where: { id: taskId },
+            select: { id: true, projectId: true, assignedToId: true, createdById: true },
+        });
         if (!parentTask) {
             return res.status(404).json({ success: false, message: "Parent task not found" });
         }
@@ -279,6 +282,7 @@ router.post("/:taskId/subtasks", verifyToken, async (req, res) => {
         const allowed =
             req.user.role === "ADMIN" ||
             parentTask.assignedToId === req.user.id ||
+            parentTask.createdById === req.user.id ||
             (await prisma.projectMember.findFirst({
                 where: {
                     projectId: parentTask.projectId,
@@ -369,6 +373,7 @@ adminRouter.delete("/:taskId", async (req, res) => {
         // Check if task exists
         const task = await prisma.task.findUnique({
             where: { id: taskId },
+            select: { id: true, projectId: true, parentTaskId: true, assignedToId: true, createdById: true },
         });
 
         if (!task) {
@@ -440,7 +445,7 @@ router.put("/:taskId/assign", verifyToken, async (req, res) => {
             parentAssigneeAllowed = parentTask?.assignedToId === req.user.id;
         }
 
-        const canAssign = req.user.role === "ADMIN" || Boolean(projectManager) || parentAssigneeAllowed;
+        const canAssign = req.user.role === "ADMIN" || Boolean(projectManager) || parentAssigneeAllowed || task.createdById === req.user.id;
 
         if (!canAssign) {
             return res.status(403).json({
@@ -859,6 +864,7 @@ router.put("/:taskId/status", verifyToken, async (req, res) => {
         const canUpdateStatus =
             req.user.role === "ADMIN" ||
             task.assignedToId === req.user.id ||
+            task.createdById === req.user.id ||
             (await prisma.projectMember.findFirst({
                 where: {
                     projectId: task.projectId,

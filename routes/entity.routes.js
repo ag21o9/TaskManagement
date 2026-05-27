@@ -38,9 +38,10 @@ const projectSelect = {
 };
 
 // ======================================================
-// POST /api/entities (ADMIN ONLY)
+// POST /api/entities (ADMIN + USER)
 // ======================================================
-router.post("/", verifyToken, isAdmin, async (req, res) => {
+// Allow authenticated users to create entities. Admins keep full access.
+router.post("/", verifyToken, async (req, res) => {
     try {
         const {
             name,
@@ -92,11 +93,34 @@ router.post("/", verifyToken, isAdmin, async (req, res) => {
 });
 
 // ======================================================
-// GET /api/entities (ADMIN ONLY)
+// GET /api/entities (ADMIN: all, USER: their own)
 // ======================================================
-router.get("/", verifyToken, isAdmin, async (req, res) => {
+router.get("/", verifyToken, async (req, res) => {
     try {
+        if (req.user.role === "ADMIN") {
+            const entities = await prisma.entity.findMany({
+                orderBy: { createdAt: "desc" },
+                include: {
+                    createdBy: {
+                        select: {
+                            id: true,
+                            name: true,
+                            email: true,
+                        },
+                    },
+                    projects: {
+                        select: projectSelect,
+                        orderBy: { createdAt: "desc" },
+                    },
+                },
+            });
+
+            return res.status(200).json({ success: true, data: entities });
+        }
+
+        // Non-admin users: only entities created by them
         const entities = await prisma.entity.findMany({
+            where: { createdById: req.user.id },
             orderBy: { createdAt: "desc" },
             include: {
                 createdBy: {
@@ -113,16 +137,10 @@ router.get("/", verifyToken, isAdmin, async (req, res) => {
             },
         });
 
-        res.status(200).json({
-            success: true,
-            data: entities,
-        });
+        res.status(200).json({ success: true, data: entities });
     } catch (error) {
         console.error("Get entities error:", error);
-        res.status(500).json({
-            success: false,
-            message: "Internal server error",
-        });
+        res.status(500).json({ success: false, message: "Internal server error" });
     }
 });
 

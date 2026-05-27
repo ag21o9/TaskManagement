@@ -5,11 +5,12 @@ import { verifyToken, isAdmin } from "../middlewares/auth.middleware.js";
 
 const router = express.Router();
 
-// Apply auth middleware to all routes in this file
-router.use(verifyToken, isAdmin);
+// Apply auth middleware to all routes in this file (require authentication).
+// Admin checks are applied per-route for admin-only operations.
+router.use(verifyToken);
 
 
-router.post("/create", async (req, res) => {
+router.post("/create", isAdmin, async (req, res) => {
     try {
         const { name, email, password, role, phone, avatar } = req.body;
 
@@ -138,7 +139,7 @@ router.get("/", async (req, res) => {
 // ======================================================
 // PUT /users/:id
 // ======================================================
-router.put("/:id", async (req, res) => {
+router.put("/:id", isAdmin, async (req, res) => {
     try {
         const { id } = req.params;
         const { name, email, role, phone, avatar, isActive } = req.body;

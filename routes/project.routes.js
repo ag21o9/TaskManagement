@@ -27,6 +27,74 @@ const canAccessProject = async (projectId, userId, role) => {
     return Boolean(member);
 };
 
+// ======================================================
+// POST /api/projects (AUTHENTICATED USERS)
+// ======================================================
+// Allow admins and regular users to create projects. Non-admin creators become MANAGER.
+router.post("/", verifyToken, async (req, res) => {
+    try {
+        const { name, description, color, startDate, endDate, entityId } = req.body;
+
+        // Validation
+        if (!name) {
+            return res.status(400).json({ success: false, message: "Project name is required" });
+        }
+
+        let entity = null;
+        if (entityId) {
+            entity = await prisma.entity.findUnique({ where: { id: entityId } });
+            if (!entity) {
+                return res.status(404).json({ success: false, message: "Entity not found" });
+            }
+        }
+
+        const memberRole = req.user.role === "ADMIN" ? "OWNER" : "MANAGER";
+
+        // Create project
+        const project = await prisma.project.create({
+            data: {
+                title: name,
+                description,
+                color,
+                startDate: startDate ? new Date(startDate) : undefined,
+                endDate: endDate ? new Date(endDate) : undefined,
+                entityId: entityId || null,
+                createdById: req.user.id,
+                members: {
+                    create: {
+                        userId: req.user.id,
+                        role: memberRole,
+                    },
+                },
+            },
+            include: {
+                createdBy: { select: { id: true, name: true, email: true } },
+                entity: {
+                    select: {
+                        id: true,
+                        name: true,
+                        state: true,
+                        phoneNumber: true,
+                        address: true,
+                        workProfile: true,
+                        networks: true,
+                        gst: true,
+                        pan: true,
+                        createdAt: true,
+                        updatedAt: true,
+                    },
+                },
+                members: { select: { id: true, role: true, userId: true } },
+            },
+        });
+
+        res.status(201).json({ success: true, message: "Project created successfully", project });
+    } catch (error) {
+        console.error("Create project error:", error);
+        res.status(500).json({ success: false, message: "Internal server error" });
+    }
+});
+
 
 adminRouter.post("/", async (req, res) => {
     try {
