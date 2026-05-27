@@ -183,6 +183,74 @@ router.get("/:entityId", async (req, res) => {
 });
 
 // ======================================================
+// PUT /api/entities/:entityId (ADMIN + OWNER)
+// ======================================================
+router.put("/:entityId", verifyToken, async (req, res) => {
+    try {
+        const { entityId } = req.params;
+        const {
+            name,
+            state,
+            phoneNumber,
+            address,
+            workProfile,
+            networks,
+            post,
+            gst,
+            pan,
+        } = req.body;
+
+        const entity = await prisma.entity.findUnique({
+            where: { id: entityId },
+        });
+
+        if (!entity) {
+            return res.status(404).json({
+                success: false,
+                message: "Entity not found",
+            });
+        }
+
+        const canUpdate = req.user.role === "ADMIN" || entity.createdById === req.user.id;
+        if (!canUpdate) {
+            return res.status(403).json({
+                success: false,
+                message: "You can only update entities you created",
+            });
+        }
+
+        const updateData = {};
+        if (name !== undefined) updateData.name = name;
+        if (state !== undefined) updateData.state = state;
+        if (phoneNumber !== undefined) updateData.phoneNumber = phoneNumber;
+        if (address !== undefined) updateData.address = address;
+        if (workProfile !== undefined) updateData.workProfile = workProfile;
+        if (networks !== undefined) updateData.networks = networks;
+        if (post !== undefined) updateData.post = post;
+        if (gst !== undefined) updateData.gst = gst;
+        if (pan !== undefined) updateData.pan = pan;
+
+        const updatedEntity = await prisma.entity.update({
+            where: { id: entityId },
+            data: updateData,
+            select: entitySelect,
+        });
+
+        res.status(200).json({
+            success: true,
+            message: "Entity updated successfully",
+            entity: updatedEntity,
+        });
+    } catch (error) {
+        console.error("Update entity error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Internal server error",
+        });
+    }
+});
+
+// ======================================================
 // POST /api/entities/:entityId/projects (ADMIN ONLY)
 // Add one or more existing projects to an entity
 // ======================================================
