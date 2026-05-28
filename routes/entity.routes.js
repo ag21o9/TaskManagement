@@ -11,11 +11,21 @@ const entitySelect = {
     phoneNumber: true,
     address: true,
     workProfile: true,
-    networks: true,
+    references: true,
     gst: true,
     pan: true,
     createdAt: true,
     updatedAt: true,
+    network: {
+        select: {
+            id: true,
+            name: true,
+            phone: true,
+            state: true,
+            createdAt: true,
+            updatedAt: true,
+        },
+    },
     createdBy: {
         select: {
             id: true,
@@ -24,6 +34,26 @@ const entitySelect = {
         },
     },
 };
+
+function normalizeNetworkInput(network, networks) {
+    const networkData = network ?? networks;
+
+    if (networkData === undefined) {
+        return undefined;
+    }
+
+    if (!networkData || Array.isArray(networkData) || typeof networkData !== "object") {
+        return null;
+    }
+
+    const { name, phone, state } = networkData;
+
+    if (!name || !phone || !Array.isArray(state)) {
+        return null;
+    }
+
+    return { name, phone, state };
+}
 
 const projectSelect = {
     id: true,
@@ -49,11 +79,22 @@ router.post("/", verifyToken, async (req, res) => {
             phoneNumber,
             address,
             workProfile,
+            network,
             networks,
+            references,
             post,
             gst,
             pan,
         } = req.body;
+
+        const networkData = normalizeNetworkInput(network, networks);
+
+        if (networkData === null) {
+            return res.status(400).json({
+                success: false,
+                message: "network must include name, phone, and state array",
+            });
+        }
 
         if (!name || !state || !phoneNumber || !address || !workProfile) {
             return res.status(400).json({
@@ -69,11 +110,18 @@ router.post("/", verifyToken, async (req, res) => {
                 phoneNumber,
                 address,
                 workProfile,
-                networks,
+                references,
                 post,
                 gst,
                 pan,
                 createdById: req.user.id,
+                ...(networkData
+                    ? {
+                        network: {
+                            create: networkData,
+                        },
+                    }
+                    : {}),
             },
             select: entitySelect,
         });
@@ -108,6 +156,16 @@ router.get("/", verifyToken, async (req, res) => {
                             email: true,
                         },
                     },
+                    network: {
+                        select: {
+                            id: true,
+                            name: true,
+                            phone: true,
+                            state: true,
+                            createdAt: true,
+                            updatedAt: true,
+                        },
+                    },
                     projects: {
                         select: projectSelect,
                         orderBy: { createdAt: "desc" },
@@ -128,6 +186,16 @@ router.get("/", verifyToken, async (req, res) => {
                         id: true,
                         name: true,
                         email: true,
+                    },
+                },
+                network: {
+                    select: {
+                        id: true,
+                        name: true,
+                        phone: true,
+                        state: true,
+                        createdAt: true,
+                        updatedAt: true,
                     },
                 },
                 projects: {
@@ -194,11 +262,22 @@ router.put("/:entityId", verifyToken, async (req, res) => {
             phoneNumber,
             address,
             workProfile,
+            network,
             networks,
+            references,
             post,
             gst,
             pan,
         } = req.body;
+
+        const networkData = normalizeNetworkInput(network, networks);
+
+        if (networkData === null) {
+            return res.status(400).json({
+                success: false,
+                message: "network must include name, phone, and state array",
+            });
+        }
 
         const entity = await prisma.entity.findUnique({
             where: { id: entityId },
@@ -225,10 +304,19 @@ router.put("/:entityId", verifyToken, async (req, res) => {
         if (phoneNumber !== undefined) updateData.phoneNumber = phoneNumber;
         if (address !== undefined) updateData.address = address;
         if (workProfile !== undefined) updateData.workProfile = workProfile;
-        if (networks !== undefined) updateData.networks = networks;
+        if (references !== undefined) updateData.references = references;
         if (post !== undefined) updateData.post = post;
         if (gst !== undefined) updateData.gst = gst;
         if (pan !== undefined) updateData.pan = pan;
+
+        if (networkData !== undefined) {
+            updateData.network = {
+                upsert: {
+                    create: networkData,
+                    update: networkData,
+                },
+            };
+        }
 
         const updatedEntity = await prisma.entity.update({
             where: { id: entityId },
