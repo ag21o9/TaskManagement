@@ -655,7 +655,7 @@ router.get("/", verifyToken, async (req, res) => {
                         phoneNumber: true,
                         address: true,
                         workProfile: true,
-                        networks: true,
+                        network: true,
                         gst: true,
                         pan: true,
                         createdAt: true,
