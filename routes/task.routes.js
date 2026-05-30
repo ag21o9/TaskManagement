@@ -1,4 +1,5 @@
 import express from "express";
+import { randomUUID } from "node:crypto";
 import { prisma } from "../lib/prisma.js";
 import { recordTaskActivity } from "../lib/taskActivity.js";
 import { verifyToken, isAdmin } from "../middlewares/auth.middleware.js";
@@ -19,6 +20,44 @@ const ensureProjectMember = async (projectId, userId) => {
             data: { projectId, userId, role: "MEMBER" },
         });
     }
+};
+
+const buildTaskCodePrefix = (title) => {
+    const prefix = (title ?? "SUB")
+        .replace(/[^a-zA-Z0-9]/g, "")
+        .slice(0, 3)
+        .toUpperCase();
+
+    return prefix || "SUB";
+};
+
+const createTaskWithRetries = async ({ projectId, projectTitle, data, include, maxAttempts = 5 }) => {
+    const prefix = buildTaskCodePrefix(projectTitle);
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const taskCode =
+            attempt === 0
+                ? `${prefix}-${(await prisma.task.count({ where: { projectId } })) + 1}`
+                : `${prefix}-${randomUUID().split("-")[0].toUpperCase()}-${attempt + 1}`;
+
+        try {
+            return await prisma.task.create({
+                data: {
+                    ...data,
+                    taskCode,
+                },
+                include,
+            });
+        } catch (error) {
+            if (error?.code === "P2002" && attempt < maxAttempts - 1) {
+                continue;
+            }
+
+            throw error;
+        }
+    }
+
+    throw new Error("Failed to create task with a unique taskCode");
 };
 
 const getAccessibleTaskWhere = async (userId, role) => {
@@ -108,14 +147,11 @@ router.post("/", verifyToken, async (req, res) => {
             }
         }
 
-        // Generate task code
-        const taskCount = await prisma.task.count({ where: { projectId } });
-        const taskCode = `${project.title.substring(0, 3).toUpperCase()}-${taskCount + 1}`;
-
-        // Create task
-        const task = await prisma.task.create({
+        // Create task with a collision-safe taskCode
+        const task = await createTaskWithRetries({
+            projectId,
+            projectTitle: project.title,
             data: {
-                taskCode,
                 title,
                 description,
                 projectId,
@@ -306,15 +342,13 @@ router.post("/:taskId/subtasks", verifyToken, async (req, res) => {
             }
         }
 
-        // Generate task code based on project
-        const taskCount = await prisma.task.count({ where: { projectId: parentTask.projectId } });
         const project = await prisma.project.findUnique({ where: { id: parentTask.projectId } });
-        const taskCode = `${project?.title?.substring(0, 3).toUpperCase() || 'SUB'}-${taskCount + 1}`;
-
-        // Create subtask
-        const subtask = await prisma.task.create({
+        
+        // Create subtask with a collision-safe taskCode
+        const subtask = await createTaskWithRetries({
+            projectId: parentTask.projectId,
+            projectTitle: project?.title,
             data: {
-                taskCode,
                 title,
                 description,
                 projectId: parentTask.projectId,
